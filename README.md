@@ -1,2 +1,1 @@
-# station-firmware
-Firmware for ESP32-based weather station collecting some environmental data
+This repository contains the firmware code for the ESP32-based weather station. The firmware is written in Arduino (.ino) and interfaces with multiple sensors to measure environmental parameters including temperature, humidity, illumination, and atmospheric pressure. Additionally, it calculates the dew point based on the sensor data.
