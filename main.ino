@@ -6,9 +6,7 @@
 #include <BH1750.h>
 #include <math.h>
 
-// WiFi credentials
-const char *ssid = "SSID";
-const char *password = "PASSWORD";
+#include "env.h"
 
 #define BMP280_AHT20_PIN 12
 #define BH1750_PIN 14
@@ -40,7 +38,7 @@ void prepare_gpio_for_sleep()
 void connectToWiFi()
 {
     Serial.print("Connecting to WiFi...");
-    WiFi.begin(ssid, password);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     while (WiFi.status() != WL_CONNECTED)
     {
         delay(500);
