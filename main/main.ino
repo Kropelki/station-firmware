@@ -51,7 +51,8 @@ void connectToWiFi()
 
 void sendToDatabase(float tempC, float humidity, float pressure_hPa, float dewpointC, float lux, float battery_voltage, float solar_panel_voltage) {
   HTTPClient http;
-  String url = "http://192.168.1.18:8000/api/weather?temperature=" + String(tempC, 2) +
+  String url = TEST_SERVER_HOST + ":" + String(TEST_SERVER_PORT) + "/api/weather" +
+               "?temperature=" + String(tempC, 2) +
                "&dew_point=" + String(dewpointC, 2) +
                "&humidity=" + String(humidity, 1) +
                "&illumination=" + String(lux, 1) +
