@@ -78,8 +78,13 @@ void sendToInfluxDB(float tempC, float humidity, float pressure_hPa, float dewpo
 
     const char* influxdb_url = "https://eu-central-1-1.aws.cloud2.influxdata.com/api/v2/write?bucket=db.v0&precision=ns";
     
+    unsigned long start = millis();
     Serial.print("Sending data to InfluxDB...");
+
+    unsigned long dns_start = millis();
     http.begin(influxdb_url);
+    Serial.printf("HTTP begin took: %lu ms\n", millis() - dns_start);
+    http.setTimeout(10000);
     
     http.addHeader("Authorization", String("Token ") + INFLUXDB_API_TOKEN);
     http.addHeader("Content-Type", "text/plain; charset=utf-8");
@@ -95,15 +100,18 @@ void sendToInfluxDB(float tempC, float humidity, float pressure_hPa, float dewpo
                      "battery_voltage=" + String(battery_voltage, 2) + "," +
                      "solar_panel_voltage=" + String(solar_panel_voltage, 2);
     
-    Serial.println(payload);
+    unsigned long post_start = millis();
     int httpResponseCode = http.POST(payload);
+    Serial.println(payload);
+    Serial.printf("POST took: %lu ms\n", millis() - post_start);
+    Serial.printf("Total time: %lu ms\n", millis() - start);
     
     if (httpResponseCode > 0) {
-      String response = http.getString();
+      // String response = http.getString();
       Serial.print("HTTP Response Code: ");
       Serial.println(httpResponseCode);
-      Serial.print("Response: ");
-      Serial.println(response);
+      // Serial.print("Response: ");
+      // Serial.println(response);
     } else {
       Serial.print("Error in HTTP request: ");
       Serial.println(httpResponseCode);
@@ -169,7 +177,13 @@ void setup() {
   Serial.printf("Solar panel voltage: %.2f V\n", solar_panel_voltage);
 
   // sendToDatabase(temp.temperature, humidity.relative_humidity, pressure, dewpoint, lux, battery_voltage, solar_panel_voltage);
-  sendToInfluxDB(temp.temperature, humidity.relative_humidity, pressure, dewpoint, lux, battery_voltage, solar_panel_voltage);
+  try {
+    sendToInfluxDB(temp.temperature, humidity.relative_humidity, pressure, dewpoint, lux, battery_voltage, solar_panel_voltage);
+  } catch (const std::exception& e) {
+    Serial.printf("Error sending data to InfluxDB: %s\n", e.what());
+  } catch (...) {
+    Serial.println("Unknown error occurred while sending data to InfluxDB");
+  }
 
   // Deep sleep for 5 minutes (300,000,000 µs)
   Serial.println("Entering deep sleep for 5 minutes...");
@@ -177,6 +191,7 @@ void setup() {
 
   prepare_gpio_for_sleep();
   WiFi.mode(WIFI_OFF);
+  // esp_sleep_enable_timer_wakeup(1000000);
   esp_sleep_enable_timer_wakeup(300000000);
   esp_deep_sleep_start();
 }
