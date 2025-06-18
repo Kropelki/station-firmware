@@ -72,6 +72,49 @@ void sendToDatabase(float tempC, float humidity, float pressure_hPa, float dewpo
   http.end();
 }
 
+void sendToInfluxDB(float tempC, float humidity, float pressure_hPa, float dewpointC, float lux, float battery_voltage, float solar_panel_voltage) {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+
+    const char* influxdb_url = "https://eu-central-1-1.aws.cloud2.influxdata.com/api/v2/write?bucket=db.v0&precision=ns";
+    
+    Serial.print("Sending data to InfluxDB...");
+    http.begin(influxdb_url);
+    
+    http.addHeader("Authorization", String("Token ") + INFLUXDB_API_TOKEN);
+    http.addHeader("Content-Type", "text/plain; charset=utf-8");
+    http.addHeader("Accept", "application/json");
+    // example_payload = "weather temperature=200.37,humidity=40.2,pressure=1012,illumination=56.3,dew_point=30 1750260267000000000";
+
+    String payload = String("weather ") +
+                     "temperature=" + String(tempC, 2) + "," +
+                     "humidity=" + String(humidity, 1) + "," +
+                     "pressure=" + String(pressure_hPa, 2) + "," +
+                     "illumination=" + String(lux, 1) + "," +
+                     "dew_point=" + String(dewpointC, 1) + "," +
+                     "battery_voltage=" + String(battery_voltage, 2) + "," +
+                     "solar_panel_voltage=" + String(solar_panel_voltage, 2);
+    
+    Serial.println(payload);
+    int httpResponseCode = http.POST(payload);
+    
+    if (httpResponseCode > 0) {
+      String response = http.getString();
+      Serial.print("HTTP Response Code: ");
+      Serial.println(httpResponseCode);
+      Serial.print("Response: ");
+      Serial.println(response);
+    } else {
+      Serial.print("Error in HTTP request: ");
+      Serial.println(httpResponseCode);
+    }
+    
+    http.end();
+  } else {
+    Serial.println("WiFi not connected");
+  }
+}
+
 void setup() {
   btStop();
 
@@ -125,7 +168,8 @@ void setup() {
   Serial.printf("Battery voltage: %.2f V\n", battery_voltage);
   Serial.printf("Solar panel voltage: %.2f V\n", solar_panel_voltage);
 
-  sendToDatabase(temp.temperature, humidity.relative_humidity, pressure, dewpoint, lux, battery_voltage, solar_panel_voltage);
+  // sendToDatabase(temp.temperature, humidity.relative_humidity, pressure, dewpoint, lux, battery_voltage, solar_panel_voltage);
+  sendToInfluxDB(temp.temperature, humidity.relative_humidity, pressure, dewpoint, lux, battery_voltage, solar_panel_voltage);
 
   // Deep sleep for 5 minutes (300,000,000 µs)
   Serial.println("Entering deep sleep for 5 minutes...");
