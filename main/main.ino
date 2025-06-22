@@ -9,6 +9,7 @@
 #include "env.h"
 
 const float voltage_multiplier = 3.2;
+String logBuffer = "";
 
 #define BMP280_AHT20_PIN 12
 #define BH1750_PIN 14
@@ -21,54 +22,156 @@ Adafruit_BMP280 bmp;
 Adafruit_AHTX0 aht;
 BH1750 lightMeter;
 
-float calculateDewPoint(float tempC, float humidity) {
-  const float a = 17.62;
-  const float b = 243.12;
-  float alpha = ((a * tempC) / (b + tempC)) + log(humidity / 100.0);
-  return (b * alpha) / (a - alpha);
+void serialLog(String message) {
+  logBuffer += message + "\n";
+  Serial.println(message);
 }
 
-void prepare_gpio_for_sleep() {
-  for (int pin = 0; pin <= 39; pin++) {
-    if (pin != 6 && pin != 7 && pin != 8 && pin != 9 && pin != 10 && pin != 11 && pin != 1 && pin != 3 && pin != 34 && pin != 35) {
+float calculateDewPoint(float temperature_c, float humidity) {
+  const float a = 17.62;
+  const float b = 243.12;
+  float alpha = ((a * temperature_c) / (b + temperature_c)) + log(humidity / 100.0);
+  return(b * alpha) / (a - alpha);
+}
+
+void prepareGpioForSleep() {
+  for(int pin = 0; pin <= 39; pin++) {
+    if(pin != 6 && pin != 7 && pin != 8 && pin != 9 && pin != 10 && pin != 11 && pin != 1 && pin != 3 && pin != 34 && pin != 35) {
       pinMode(pin, PULLDOWN);
     }
   }
 }
 
-void connectToWiFi()
-{
-    Serial.print("Connecting to WiFi...");
+void connectToWiFi() {
+    serialLog("Connecting to WiFi...");
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    while (WiFi.status() != WL_CONNECTED)
-    {
-        delay(500);
-        Serial.print(".");
+    while(WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      serialLog(".");
     }
-    Serial.println("\nWiFi connected!");
-    Serial.println(WiFi.localIP());
+    serialLog("\nWiFi connected!");
+    serialLog(WiFi.localIP().toString());
 }
 
-void sendToDatabase(float tempC, float humidity, float pressure_hPa, float dewpointC, float lux, float battery_voltage, float solar_panel_voltage) {
+void sendLog() {
   HTTPClient http;
-  String url = "http://192.168.1.18:8000/api/weather?temperature=" + String(tempC, 2) +
-               "&dew_point=" + String(dewpointC, 2) +
+  http.begin(LOG_SERVER_URL);
+  http.addHeader("Content-Type", "text/plain");
+
+  int httpResponseCode = http.POST(logBuffer);
+
+  if(httpResponseCode > 0) {
+    serialLog("Log wysłany! Kod: " + String(httpResponseCode));
+  }
+  else {
+    serialLog("Błąd wysyłania loga: " + http.errorToString(httpResponseCode));
+  }
+
+  http.end();
+}
+
+void sendToDatabase(float temperature_c, float humidity, float pressure, float dewpoint_c, float illumination, float battery_voltage, float solar_panel_voltage) {
+  HTTPClient http;
+  String url = String(TEST_SERVER_HOST) + ":" + String(TEST_SERVER_PORT) + "/api/weather" +
+               "?temperature=" + String(temperature_c, 2) +
+               "&dew_point=" + String(dewpoint_c, 2) +
                "&humidity=" + String(humidity, 1) +
-               "&illumination=" + String(lux, 1) +
-               "&pressure=" + String(pressure_hPa, 2) +
+               "&illumination=" + String(illumination, 1) +
+               "&pressure=" + String(pressure, 2) +
                "&battery_voltage=" + String(battery_voltage, 2) +
                "&solar_panel_voltage=" + String(solar_panel_voltage, 2);
 
-  Serial.println("Sending to: " + url);
+  serialLog("Sending to: " + url);
   http.begin(url);
   int httpCode = http.GET();
-  if (httpCode > 0) {
-    Serial.println("Response: " + http.getString());
+  if(httpCode > 0) {
+    serialLog("Response: " + http.getString());
   }
   else {
-    Serial.println("Error on sending request");
+    serialLog("Error on sending request");
   }
   http.end();
+}
+
+void sendToInfluxDB(float temperature_c, float humidity, float pressure, float dewpoint_c, float illumination, float battery_voltage, float solar_panel_voltage) {
+  if(WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+
+    const char* InfluxDB_url = "https://eu-central-1-1.aws.cloud2.influxdata.com/api/v2/write?bucket=db.v0&precision=ns";
+
+    serialLog("Sending data to InfluxDB...");
+
+    http.begin(InfluxDB_url);
+    http.setTimeout(10000);
+
+    http.addHeader("Authorization", String("Token ") + INFLUXDB_API_TOKEN);
+    http.addHeader("Content-Type", "text/plain; charset=utf-8");
+    http.addHeader("Accept", "application/json");
+
+    // String payload = "weather temperature=200.37,humidity=40.2,pressure=1012,illumination=56.3,dew_point=30";
+    String payload = String("weather ") +
+                     "temperature=" + String(temperature_c, 2) + "," +
+                     "humidity=" + String(humidity, 1) + "," +
+                     "pressure=" + String(pressure, 2) + "," +
+                     "illumination=" + String(illumination, 1) + "," +
+                     "dew_point=" + String(dewpoint_c, 1) + "," +
+                     "battery_voltage=" + String(battery_voltage, 2) + "," +
+                     "solar_panel_voltage=" + String(solar_panel_voltage, 2);
+
+    int httpResponseCode = http.POST(payload);
+    serialLog(payload);
+
+    if(httpResponseCode > 0) {
+      // String response = http.getString();
+      serialLog("HTTP Response Code: ");
+      serialLog(String(httpResponseCode));
+      // serialLog("Response: ");
+      // serialLog(response);
+    }
+    else {
+      serialLog("Error in HTTP request: ");
+      serialLog(String(httpResponseCode));
+      serialLog(http.getString());
+    }
+
+    http.end();
+  }
+  else {
+    serialLog("WiFi not connected");
+  }
+}
+
+void sendToWeatherUnderground(float temperature_f, int humidity, float baromin, float dewpoint_f) {
+  if(WiFi.status() == WL_CONNECTED) {
+    String url = "http://weatherstation.wunderground.com/weatherstation/updateweatherstation.php";
+    url += "?ID=" + String(WEATHER_UNDERGROUND_STATION_ID);
+    url += "&PASSWORD=" + String(WEATHER_UNDERGROUND_API_KEY);
+    url += "&dateutc=now";
+    url += "&tempf=" + String(temperature_f, 2);
+    url += "&dewptf=" + String(dewpoint_f, 2);
+    url += "&humidity=" + String(humidity);
+    url += "&baromin=" + String(baromin, 2);
+    url += "&action=updateraw";
+
+    Serial.println("Sending data: " + url);
+
+    HTTPClient http;
+    http.begin(url);
+    int httpCode = http.GET();
+
+    if(httpCode > 0) {
+      String payload = http.getString();
+      Serial.println("Response: " + payload);
+    }
+    else {
+      Serial.println("Sending error: " + http.errorToString(httpCode));
+    }
+
+    http.end();
+  }
+  else {
+    serialLog("WiFi not connected");
+  }
 }
 
 void setup() {
@@ -88,19 +191,33 @@ void setup() {
   Wire.begin(21, 22); // SDA, SCL
   connectToWiFi();
 
-  if (!bmp.begin(0x77)) {
-    Serial.println("Could not find BMP280!");
-    while (1) delay(10);
+  float illumination = 0;
+  float temperature_c = -1000;
+  float humidity = -1000;
+  float pressure = -1000;
+
+  if(bmp.begin(0x77)) {
+    pressure = bmp.readPressure() / 100.0;
+  }
+  else {
+    serialLog("Could not find BMP280!");
   }
 
-  if (!aht.begin()) {
-    Serial.println("Could not find AHT20!");
-    while (1) delay(10);
+  if(aht.begin()) {
+    sensors_event_t hum, temp;
+    aht.getEvent(&hum, &temp);
+    temperature_c = temp.temperature;
+    humidity = hum.relative_humidity;
+  }
+  else {
+    serialLog("Could not find AHT20!");
   }
 
-  if (!lightMeter.begin()) {
-    Serial.println("Could not find BH1750!");
-    while (1) delay(10);
+  if(lightMeter.begin()) {
+    float illumination = lightMeter.readLightLevel();
+  }
+  else {
+    serialLog("Could not find BH1750!");
   }
 
   int raw = analogRead(SOLAR_PANEL_VOLTAGE_PIN);
@@ -108,30 +225,39 @@ void setup() {
   raw = analogRead(BATTERY_VOLTAGE_PIN);
   float battery_voltage = (raw / 4095.0) * 3.3 * voltage_multiplier;
 
-  sensors_event_t humidity, temp;
-  aht.getEvent(&humidity, &temp);
-  float pressure = bmp.readPressure() / 100.0;
+  float temperature_f = temperature_c * 9.0 / 5.0 + 32.0;
   float baromin = pressure * 0.02953;
-  float lux = lightMeter.readLightLevel();
-  float dewpoint = calculateDewPoint(temp.temperature, humidity.relative_humidity);
+  float dewpoint_c = calculateDewPoint(temperature_c, humidity);
+  float dewpoint_f = dewpoint_c * 9.0 / 5.0 + 32.0;
 
-  Serial.printf("Temperature: %.2f °C\n", temp.temperature);
-  Serial.printf("Humidity: %.1f %%\n", humidity.relative_humidity);
-  Serial.printf("Pressure: %.2f hPa\n", pressure);
-  Serial.printf("Baromin: %.2f inHg\n", baromin);
-  Serial.printf("Dew Point: %.2f °C\n", dewpoint);
-  Serial.printf("Illumination: %.1f lx\n", lux);
-  Serial.printf("Battery voltage: %.2f V\n", battery_voltage);
-  Serial.printf("Solar panel voltage: %.2f V\n", solar_panel_voltage);
+  serialLog("Temperature: " + String(temperature_c, 2) + " °C (" + String(temperature_f, 2) + " °F)");
+  serialLog("Humidity: " + String(humidity, 1) + " %");
+  serialLog("Pressure: " + String(pressure, 2) + " hPa");
+  serialLog("Baromin: " + String(baromin, 2) + " inHg");
+  serialLog("Dew Point: " + String(dewpoint_c, 2) + " °C (" + String(dewpoint_f, 2) + " °F)");
+  serialLog("Illumination: " + String(illumination, 1) + " lx");
+  serialLog("Battery voltage: " + String(battery_voltage, 2) + " V");
+  serialLog("Solar panel voltage: " + String(solar_panel_voltage, 2) + " V");
 
-  sendToDatabase(temp.temperature, humidity.relative_humidity, pressure, dewpoint, lux, battery_voltage, solar_panel_voltage);
+
+  // sendToDatabase(temperature_c, humidity, pressure, dewpoint_c, illumination, battery_voltage, solar_panel_voltage);
+  sendToInfluxDB(temperature_c, humidity, pressure, dewpoint_c, illumination, battery_voltage, solar_panel_voltage);
+
+  if(temperature_c != -1000 || humidity != -1000 || pressure != -1000){
+    sendToWeatherUnderground(temperature_f, humidity, baromin, dewpoint_f);
+  }
+  else {
+    serialLog("Can not send data to WeatherUnderground");
+  }
+
+  sendLog();
 
   // Deep sleep for 5 minutes (300,000,000 µs)
-  Serial.println("Entering deep sleep for 5 minutes...");
+  serialLog("Entering deep sleep for 5 minutes...");
 
-
-  prepare_gpio_for_sleep();
+  prepareGpioForSleep();
   WiFi.mode(WIFI_OFF);
+  // esp_sleep_enable_timer_wakeup(5000000);
   esp_sleep_enable_timer_wakeup(300000000);
   esp_deep_sleep_start();
 }
@@ -139,4 +265,3 @@ void setup() {
 void loop() {
   // Empty, everything is done in setup()
 }
-
