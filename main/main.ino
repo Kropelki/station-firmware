@@ -121,21 +121,18 @@ void sendToInfluxDB(float temperature_c, float humidity, float pressure, float d
   if(WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
 
-    const char* InfluxDB_url = "https://eu-central-1-1.aws.cloud2.infilluminationdata.com/api/v2/write?bucket=db.v0&precision=ns";
-    
-    unsigned long start = millis();
+    const char* InfluxDB_url = "https://eu-central-1-1.aws.cloud2.influxdata.com/api/v2/write?bucket=db.v0&precision=ns";
+
     serialLog("Sending data to InfluxDB...");
 
-    unsigned long dns_start = millis();
     http.begin(InfluxDB_url);
-    serialLog("HTTP begin took: " + String(millis() - dns_start) + " lu ms");
     http.setTimeout(10000);
-    
+
     http.addHeader("Authorization", String("Token ") + INFLUXDB_API_TOKEN);
     http.addHeader("Content-Type", "text/plain; charset=utf-8");
     http.addHeader("Accept", "application/json");
-    // example_payload = "weather temperature=200.37,humidity=40.2,pressure=1012,illumination=56.3,dew_point=30 1750260267000000000";
 
+    // String payload = "weather temperature=200.37,humidity=40.2,pressure=1012,illumination=56.3,dew_point=30";
     String payload = String("weather ") +
                      "temperature=" + String(temperature_c, 2) + "," +
                      "humidity=" + String(humidity, 1) + "," +
@@ -144,13 +141,10 @@ void sendToInfluxDB(float temperature_c, float humidity, float pressure, float d
                      "dew_point=" + String(dewpoint_c, 1) + "," +
                      "battery_voltage=" + String(battery_voltage, 2) + "," +
                      "solar_panel_voltage=" + String(solar_panel_voltage, 2);
-    
-    unsigned long post_start = millis();
+
     int httpResponseCode = http.POST(payload);
     serialLog(payload);
-    serialLog("POST took: " + String(millis() - post_start) + "lu ms");
-    serialLog("Total time: " + String(millis() - start) + "lu ms");
-    
+
     if(httpResponseCode > 0) {
       // String response = http.getString();
       serialLog("HTTP Response Code: ");
@@ -161,8 +155,9 @@ void sendToInfluxDB(float temperature_c, float humidity, float pressure, float d
     else {
       serialLog("Error in HTTP request: ");
       serialLog(String(httpResponseCode));
+      // serialLog(http.getString());
     }
-    
+
     http.end();
   }
   else {
@@ -294,4 +289,3 @@ void setup() {
 void loop() {
   // Empty, everything is done in setup()
 }
-
