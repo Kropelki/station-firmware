@@ -1,10 +1,12 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClient.h>
 #include <Wire.h>
 #include <Adafruit_BMP280.h>
 #include <Adafruit_AHTX0.h>
 #include <BH1750.h>
 #include <math.h>
+#include "driver/rtc_io.h"
 
 #include "env.h"
 
@@ -34,12 +36,31 @@ float calculateDewPoint(float temperature_c, float humidity) {
   return(b * alpha) / (a - alpha);
 }
 
-void prepareGpioForSleep() {
-  for(int pin = 0; pin <= 39; pin++) {
-    if(pin != 6 && pin != 7 && pin != 8 && pin != 9 && pin != 10 && pin != 11 && pin != 1 && pin != 3 && pin != 34 && pin != 35) {
-      pinMode(pin, PULLDOWN);
+void isolate_all_rtc_gpio() {
+    const gpio_num_t rtc_gpio_list[] = {
+        GPIO_NUM_0,
+        GPIO_NUM_2,
+        GPIO_NUM_4,
+        GPIO_NUM_12,
+        GPIO_NUM_13,
+        GPIO_NUM_14,
+        GPIO_NUM_15,
+        GPIO_NUM_25,
+        GPIO_NUM_26,
+        GPIO_NUM_27,
+        GPIO_NUM_32,
+        GPIO_NUM_33,
+        GPIO_NUM_34,
+        GPIO_NUM_35,
+        GPIO_NUM_36,
+        GPIO_NUM_37,
+        GPIO_NUM_38,
+        GPIO_NUM_39
+    };
+
+    for (int i = 0; i < sizeof(rtc_gpio_list)/sizeof(rtc_gpio_list[0]); i++) {
+        rtc_gpio_isolate(rtc_gpio_list[i]);
     }
-  }
 }
 
 void connectToWiFi() {
@@ -54,20 +75,23 @@ void connectToWiFi() {
 }
 
 void sendLog() {
-  HTTPClient http;
-  http.begin(LOG_SERVER_URL);
-  http.addHeader("Content-Type", "text/plain");
+  WiFiClient client;
+  if (client.connect(LOG_SERVER_HOST, LOG_SERVER_PORT)) {
+    int contentLength = logBuffer.length();
+    client.print(String("POST ") + LOG_SERVER_PATH + " HTTP/1.1\r\n" +
+                 "Host: " + LOG_SERVER_HOST + "\r\n" +
+                 "Content-Type: text/plain\r\n" +
+                 "Content-Length: " + String(contentLength) + "\r\n" +
+                 "Connection: close\r\n\r\n" +
+                 logBuffer);
 
-  int httpResponseCode = http.POST(logBuffer);
+    delay(10);
+    client.stop();
 
-  if(httpResponseCode > 0) {
-    serialLog("Log wysłany! Kod: " + String(httpResponseCode));
+    serialLog("Log sent synchronously (no response expected).");
+  } else {
+    serialLog("Failed to connect to the log server.");
   }
-  else {
-    serialLog("Błąd wysyłania loga: " + http.errorToString(httpResponseCode));
-  }
-
-  http.end();
 }
 
 void sendToDatabase(float temperature_c, float humidity, float pressure, float dewpoint_c, float illumination, float battery_voltage, float solar_panel_voltage) {
@@ -131,7 +155,7 @@ void sendToInfluxDB(float temperature_c, float humidity, float pressure, float d
     else {
       serialLog("Error in HTTP request: ");
       serialLog(String(httpResponseCode));
-      serialLog(http.getString());
+      // serialLog(http.getString());
     }
 
     http.end();
@@ -175,6 +199,7 @@ void sendToWeatherUnderground(float temperature_f, int humidity, float baromin, 
 }
 
 void setup() {
+  unsigned long startTime = millis();
   btStop();
 
   pinMode(BMP280_AHT20_PIN, OUTPUT);
@@ -240,6 +265,7 @@ void setup() {
   serialLog("Solar panel voltage: " + String(solar_panel_voltage, 2) + " V");
 
 
+  unsigned long activeTime = (millis() - startTime)/1000;
   // sendToDatabase(temperature_c, humidity, pressure, dewpoint_c, illumination, battery_voltage, solar_panel_voltage);
   sendToInfluxDB(temperature_c, humidity, pressure, dewpoint_c, illumination, battery_voltage, solar_panel_voltage);
 
@@ -252,13 +278,11 @@ void setup() {
 
   sendLog();
 
-  // Deep sleep for 5 minutes (300,000,000 µs)
-  serialLog("Entering deep sleep for 5 minutes...");
-
-  prepareGpioForSleep();
+  isolate_all_rtc_gpio();
   WiFi.mode(WIFI_OFF);
-  // esp_sleep_enable_timer_wakeup(5000000);
-  esp_sleep_enable_timer_wakeup(300000000);
+  unsigned long sleepTime = (CYCLE_TIME_SEC - activeTime) * 1000000;
+  serialLog("Entering deep sleep for " + String(sleepTime/1000000) +" seconds...");
+  esp_sleep_enable_timer_wakeup(sleepTime);
   esp_deep_sleep_start();
 }
 
