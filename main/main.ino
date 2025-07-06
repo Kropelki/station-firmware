@@ -265,6 +265,7 @@ void setup() {
   serialLog("Solar panel voltage: " + String(solar_panel_voltage, 2) + " V");
 
 
+  unsigned long activeTime = (millis() - startTime)/1000;
   // sendToDatabase(temperature_c, humidity, pressure, dewpoint_c, illumination, battery_voltage, solar_panel_voltage);
   sendToInfluxDB(temperature_c, humidity, pressure, dewpoint_c, illumination, battery_voltage, solar_panel_voltage);
 
@@ -279,7 +280,6 @@ void setup() {
 
   isolate_all_rtc_gpio();
   WiFi.mode(WIFI_OFF);
-  unsigned long activeTime = (millis() - startTime)/1000;
   unsigned long sleepTime = (CYCLE_TIME_SEC - activeTime) * 1000000;
   serialLog("Entering deep sleep for " + String(sleepTime/1000000) +" seconds...");
   esp_sleep_enable_timer_wakeup(sleepTime);
